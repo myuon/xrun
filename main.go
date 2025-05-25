@@ -134,7 +134,7 @@ func processJSONWithExecutor(dataFile, execTemplate string, executor CommandExec
 	}
 	defer file.Close()
 
-	var data []map[string]interface{}
+	var data []map[string]any
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(&data); err != nil {
 		return fmt.Errorf("failed to parse JSON: %v", err)
