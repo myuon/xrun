@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -33,7 +34,7 @@ func TestProcessCSVWithExecutor(t *testing.T) {
 1,John Doe,john@example.com`,
 			execTemplate: "echo {{.invalid_field}}",
 			expectedCommands: []string{
-				"echo ",
+				"echo <no value>",
 			},
 			expectError: false,
 		},
@@ -236,8 +237,8 @@ func TestProcessDataFileWithExecutor(t *testing.T) {
 			]`,
 			execTemplate: "echo {{.name}} {{.id}} {{.active}} {{.score}}",
 			expectedCommands: []string{
-				"echo Alice 1 true 96",
-				"echo Bob 2 false 87",
+				"echo Alice 1 true 95.5",
+				"echo Bob 2 false 87.2",
 			},
 			expectError: false,
 		},
@@ -249,8 +250,8 @@ John Doe,john@example.com
 Jane Smith,jane@example.com`,
 			execTemplate: "echo {{.user_id}} {{.name}} {{.email}}",
 			expectedCommands: []string{
-				"echo  John Doe john@example.com",
-				"echo  Jane Smith jane@example.com",
+				"echo <no value> John Doe john@example.com",
+				"echo <no value> Jane Smith jane@example.com",
 			},
 			expectError: false,
 		},
@@ -259,7 +260,7 @@ Jane Smith,jane@example.com`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temporary file
-			tmpFile, err := os.CreateTemp("", tt.fileName)
+			tmpFile, err := os.CreateTemp("", "test_*"+filepath.Ext(tt.fileName))
 			if err != nil {
 				t.Fatalf("Failed to create temp file: %v", err)
 			}

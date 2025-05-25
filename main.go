@@ -156,7 +156,7 @@ func processJSONWithExecutor(dataFile, execTemplate string, executor CommandExec
 				case string:
 					stringRow[key] = v
 				case float64:
-					stringRow[key] = fmt.Sprintf("%.0f", v)
+					stringRow[key] = fmt.Sprintf("%g", v)
 				case bool:
 					stringRow[key] = fmt.Sprintf("%t", v)
 				default:
@@ -220,7 +220,7 @@ func processJSONLWithExecutor(dataFile, execTemplate string, executor CommandExe
 				case string:
 					stringRow[key] = v
 				case float64:
-					stringRow[key] = fmt.Sprintf("%.0f", v)
+					stringRow[key] = fmt.Sprintf("%g", v)
 				case bool:
 					stringRow[key] = fmt.Sprintf("%t", v)
 				default:
