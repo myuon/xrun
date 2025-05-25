@@ -51,12 +51,12 @@ Bob,25`,
 			var executedCommands []string
 			var printedCommands []string
 			
-			originalExecuteCommand := func(command string) error {
+			originalExecuteCommand := func(command string, progress Progress) error {
 				executedCommands = append(executedCommands, command)
 				return nil
 			}
 			
-			originalPrintCommand := func(command string) error {
+			originalPrintCommand := func(command string, progress Progress) error {
 				printedCommands = append(printedCommands, command)
 				return nil
 			}

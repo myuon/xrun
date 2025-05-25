@@ -80,7 +80,7 @@ Bob`,
 
 			// Track executed commands
 			var executedCommands []string
-			mockExecutor := func(command string) error {
+			mockExecutor := func(command string, progress Progress) error {
 				executedCommands = append(executedCommands, command)
 				return nil
 			}
@@ -164,7 +164,7 @@ func TestProcessCSVWithExecutor_ErrorCases(t *testing.T) {
 				csvFile = tt.csvFile
 			}
 
-			mockExecutor := func(command string) error {
+			mockExecutor := func(command string, progress Progress) error {
 				return nil
 			}
 
@@ -273,7 +273,7 @@ Jane Smith,jane@example.com`,
 
 			// Track executed commands
 			var executedCommands []string
-			mockExecutor := func(command string) error {
+			mockExecutor := func(command string, progress Progress) error {
 				executedCommands = append(executedCommands, command)
 				return nil
 			}
