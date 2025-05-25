@@ -21,13 +21,15 @@ type CommandExecutor func(command string) error
 func main() {
 	var dataFile string
 	var execTemplate string
+	var dryRun bool
 
 	flag.StringVar(&dataFile, "d", "", "Path to the data file (CSV/JSON/JSONL)")
 	flag.StringVar(&execTemplate, "e", "", "Command template to execute for each row")
+	flag.BoolVar(&dryRun, "dry-run", false, "Print commands to stdout instead of executing them")
 	flag.Parse()
 
 	if dataFile != "" && execTemplate != "" {
-		if err := processDataFile(dataFile, execTemplate); err != nil {
+		if err := processDataFileWithDryRun(dataFile, execTemplate, dryRun); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -55,6 +57,14 @@ func main() {
 
 func processDataFile(dataFile, execTemplate string) error {
 	return processDataFileWithExecutor(dataFile, execTemplate, executeCommand)
+}
+
+func processDataFileWithDryRun(dataFile, execTemplate string, dryRun bool) error {
+	executor := executeCommand
+	if dryRun {
+		executor = printCommand
+	}
+	return processDataFileWithExecutor(dataFile, execTemplate, executor)
 }
 
 func processDataFileWithExecutor(dataFile, execTemplate string, executor CommandExecutor) error {
@@ -264,17 +274,23 @@ func executeCommand(command string) error {
 	return cmd.Run()
 }
 
+func printCommand(command string) error {
+	fmt.Println(command)
+	return nil
+}
+
 func showHelp() {
 	fmt.Println("xrun - CLI tool")
 	fmt.Println("\nUsage:")
 	fmt.Println("  xrun <command>")
-	fmt.Println("  xrun -d <data-file> -e \"<command-template>\"")
+	fmt.Println("  xrun -d <data-file> -e \"<command-template>\" [--dry-run]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  version    Show version information")
 	fmt.Println("  help       Show this help message")
 	fmt.Println("\nData processing options:")
 	fmt.Println("  -d         Path to the data file (CSV/JSON/JSONL)")
 	fmt.Println("  -e         Command template to execute for each row")
+	fmt.Println("  --dry-run  Print commands to stdout instead of executing them")
 	fmt.Println("\nSupported file formats:")
 	fmt.Println("  .csv       CSV files with headers")
 	fmt.Println("  .json      JSON array of objects")
