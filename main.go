@@ -19,6 +19,9 @@ import (
 // CommandExecutor is a function type for executing commands, allowing for dependency injection
 type CommandExecutor func(command string) error
 
+// ProgressAwareCommandExecutor is a function type for executing commands with progress information
+type ProgressAwareCommandExecutor func(command string, current int, total int) error
+
 // LogWriter handles writing to log files
 type LogWriter struct {
 	file *os.File
@@ -126,21 +129,46 @@ func processDataFileWithOptions(dataFile, execTemplate string, dryRun, noLogFile
 		defer logWriter.Close()
 	}
 	
-	executor := createCommandExecutor(dryRun, logWriter)
-	return processDataFileWithExecutor(dataFile, execTemplate, executor)
+	var progressExecutor ProgressAwareCommandExecutor
+	if dryRun {
+		progressExecutor = func(command string, current int, total int) error {
+			return printCommand(command)
+		}
+	} else {
+		progressExecutor = func(command string, current int, total int) error {
+			return executeCommandWithProgressAndLogging(command, current, total, logWriter)
+		}
+	}
+	
+	ext := strings.ToLower(filepath.Ext(dataFile))
+	
+	switch ext {
+	case ".json":
+		return processJSONWithProgressExecutor(dataFile, execTemplate, progressExecutor)
+	case ".jsonl":
+		return processJSONLWithProgressExecutor(dataFile, execTemplate, progressExecutor)
+	default:
+		// Fallback to CSV for unknown extensions or .csv
+		return processCSVWithProgressExecutor(dataFile, execTemplate, progressExecutor)
+	}
 }
 
 func processDataFileWithExecutor(dataFile, execTemplate string, executor CommandExecutor) error {
 	ext := strings.ToLower(filepath.Ext(dataFile))
 	
+	// Convert regular executor to progress-aware executor
+	progressExecutor := func(command string, current int, total int) error {
+		return executor(command)
+	}
+	
 	switch ext {
 	case ".json":
-		return processJSONWithExecutor(dataFile, execTemplate, executor)
+		return processJSONWithProgressExecutor(dataFile, execTemplate, progressExecutor)
 	case ".jsonl":
-		return processJSONLWithExecutor(dataFile, execTemplate, executor)
+		return processJSONLWithProgressExecutor(dataFile, execTemplate, progressExecutor)
 	default:
 		// Fallback to CSV for unknown extensions or .csv
-		return processCSVWithExecutor(dataFile, execTemplate, executor)
+		return processCSVWithProgressExecutor(dataFile, execTemplate, progressExecutor)
 	}
 }
 
@@ -150,6 +178,15 @@ func processCSV(dataFile, execTemplate string) error {
 
 // processCSVWithExecutor handles CSV processing with an injectable command executor
 func processCSVWithExecutor(dataFile, execTemplate string, executor CommandExecutor) error {
+	// Convert to progress-aware executor
+	progressExecutor := func(command string, current int, total int) error {
+		return executor(command)
+	}
+	return processCSVWithProgressExecutor(dataFile, execTemplate, progressExecutor)
+}
+
+// processCSVWithProgressExecutor handles CSV processing with progress tracking
+func processCSVWithProgressExecutor(dataFile, execTemplate string, executor ProgressAwareCommandExecutor) error {
 	file, err := os.Open(dataFile)
 	if err != nil {
 		return fmt.Errorf("failed to open data file: %v", err)
@@ -163,11 +200,8 @@ func processCSVWithExecutor(dataFile, execTemplate string, executor CommandExecu
 		return fmt.Errorf("failed to read CSV headers: %v", err)
 	}
 
-	tmpl, err := template.New("command").Parse(execTemplate)
-	if err != nil {
-		return fmt.Errorf("failed to parse template: %v", err)
-	}
-
+	// Read all rows first to get total count
+	var allRows [][]string
 	for {
 		row, err := reader.Read()
 		if err == io.EOF {
@@ -176,11 +210,20 @@ func processCSVWithExecutor(dataFile, execTemplate string, executor CommandExecu
 		if err != nil {
 			return fmt.Errorf("failed to read CSV row: %v", err)
 		}
+		allRows = append(allRows, row)
+	}
 
+	tmpl, err := template.New("command").Parse(execTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %v", err)
+	}
+
+	total := len(allRows)
+	for i, row := range allRows {
 		data := make(map[string]string)
-		for i, header := range headers {
-			if i < len(row) {
-				data[header] = row[i]
+		for j, header := range headers {
+			if j < len(row) {
+				data[header] = row[j]
 			}
 		}
 
@@ -191,7 +234,7 @@ func processCSVWithExecutor(dataFile, execTemplate string, executor CommandExecu
 		}
 
 		command := buf.String()
-		if err := executor(command); err != nil {
+		if err := executor(command, i+1, total); err != nil {
 			fmt.Fprintf(os.Stderr, "Command execution error: %v\n", err)
 		}
 	}
@@ -201,6 +244,15 @@ func processCSVWithExecutor(dataFile, execTemplate string, executor CommandExecu
 
 // processJSONWithExecutor handles JSON array processing with an injectable command executor
 func processJSONWithExecutor(dataFile, execTemplate string, executor CommandExecutor) error {
+	// Convert to progress-aware executor
+	progressExecutor := func(command string, current int, total int) error {
+		return executor(command)
+	}
+	return processJSONWithProgressExecutor(dataFile, execTemplate, progressExecutor)
+}
+
+// processJSONWithProgressExecutor handles JSON array processing with progress tracking
+func processJSONWithProgressExecutor(dataFile, execTemplate string, executor ProgressAwareCommandExecutor) error {
 	file, err := os.Open(dataFile)
 	if err != nil {
 		return fmt.Errorf("failed to open data file: %v", err)
@@ -218,7 +270,8 @@ func processJSONWithExecutor(dataFile, execTemplate string, executor CommandExec
 		return fmt.Errorf("failed to parse template: %v", err)
 	}
 
-	for _, row := range data {
+	total := len(data)
+	for i, row := range data {
 		// Convert interface{} values to strings for template compatibility
 		stringRow := make(map[string]string)
 		for key, value := range row {
@@ -247,7 +300,7 @@ func processJSONWithExecutor(dataFile, execTemplate string, executor CommandExec
 		}
 
 		command := buf.String()
-		if err := executor(command); err != nil {
+		if err := executor(command, i+1, total); err != nil {
 			fmt.Fprintf(os.Stderr, "Command execution error: %v\n", err)
 		}
 	}
@@ -257,6 +310,15 @@ func processJSONWithExecutor(dataFile, execTemplate string, executor CommandExec
 
 // processJSONLWithExecutor handles JSONL (JSON Lines) processing with an injectable command executor
 func processJSONLWithExecutor(dataFile, execTemplate string, executor CommandExecutor) error {
+	// Convert to progress-aware executor
+	progressExecutor := func(command string, current int, total int) error {
+		return executor(command)
+	}
+	return processJSONLWithProgressExecutor(dataFile, execTemplate, progressExecutor)
+}
+
+// processJSONLWithProgressExecutor handles JSONL (JSON Lines) processing with progress tracking
+func processJSONLWithProgressExecutor(dataFile, execTemplate string, executor ProgressAwareCommandExecutor) error {
 	file, err := os.Open(dataFile)
 	if err != nil {
 		return fmt.Errorf("failed to open data file: %v", err)
@@ -268,18 +330,25 @@ func processJSONLWithExecutor(dataFile, execTemplate string, executor CommandExe
 		return fmt.Errorf("failed to parse template: %v", err)
 	}
 
+	// Read all lines first to get total count
+	var allLines []string
 	scanner := bufio.NewScanner(file)
-	lineNum := 0
 	for scanner.Scan() {
-		lineNum++
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue // Skip empty lines
+		if line != "" { // Skip empty lines
+			allLines = append(allLines, line)
 		}
+	}
 
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading JSONL file: %v", err)
+	}
+
+	total := len(allLines)
+	for i, line := range allLines {
 		var row map[string]interface{}
 		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to parse JSON on line %d: %v\n", lineNum, err)
+			fmt.Fprintf(os.Stderr, "Failed to parse JSON on line %d: %v\n", i+1, err)
 			continue
 		}
 
@@ -306,34 +375,62 @@ func processJSONLWithExecutor(dataFile, execTemplate string, executor CommandExe
 
 		var buf bytes.Buffer
 		if err := tmpl.Execute(&buf, stringRow); err != nil {
-			fmt.Fprintf(os.Stderr, "Template execution error for line %d: %v\n", lineNum, err)
+			fmt.Fprintf(os.Stderr, "Template execution error for line %d: %v\n", i+1, err)
 			continue
 		}
 
 		command := buf.String()
-		if err := executor(command); err != nil {
+		if err := executor(command, i+1, total); err != nil {
 			fmt.Fprintf(os.Stderr, "Command execution error: %v\n", err)
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading JSONL file: %v", err)
 	}
 
 	return nil
 }
 
 func executeCommand(command string) error {
+	return executeCommandWithProgress(command, 0, 0)
+}
+
+func executeCommandWithProgress(command string, current int, total int) error {
+	return executeCommandWithProgressAndLogging(command, current, total, nil)
+}
+
+func executeCommandWithProgressAndLogging(command string, current int, total int, logWriter *LogWriter) error {
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return fmt.Errorf("empty command")
 	}
 
 	cmd := exec.Command(parts[0], parts[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	
-	fmt.Printf("Executing: %s\n", command)
+	// Create multi-writers to output to both console and log file
+	var stdoutWriter, stderrWriter io.Writer
+	if logWriter != nil {
+		stdoutWriter = io.MultiWriter(os.Stdout, logWriter)
+		stderrWriter = io.MultiWriter(os.Stderr, logWriter)
+	} else {
+		stdoutWriter = os.Stdout
+		stderrWriter = os.Stderr
+	}
+	
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
+	
+	// Format the log with timestamp and progress
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	var logMessage string
+	if current > 0 && total > 0 {
+		logMessage = fmt.Sprintf("[%d/%d] %s Executing: %s", current, total, timestamp, command)
+	} else {
+		logMessage = fmt.Sprintf("%s Executing: %s", timestamp, command)
+	}
+	
+	fmt.Println(logMessage)
+	if logWriter != nil {
+		fmt.Fprintln(logWriter, logMessage)
+	}
+	
 	return cmd.Run()
 }
 
