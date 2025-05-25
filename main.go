@@ -13,23 +13,45 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 )
 
 // CommandExecutor is a function type for executing commands, allowing for dependency injection
 type CommandExecutor func(command string) error
 
+// LogWriter handles writing to log files
+type LogWriter struct {
+	file *os.File
+}
+
+func (lw *LogWriter) Write(p []byte) (n int, err error) {
+	if lw.file != nil {
+		return lw.file.Write(p)
+	}
+	return len(p), nil
+}
+
+func (lw *LogWriter) Close() error {
+	if lw.file != nil {
+		return lw.file.Close()
+	}
+	return nil
+}
+
 func main() {
 	var dataFile string
 	var execTemplate string
 	var dryRun bool
+	var noLogFiles bool
 
 	flag.StringVar(&dataFile, "d", "", "Path to the data file (CSV/JSON/JSONL)")
 	flag.StringVar(&execTemplate, "e", "", "Command template to execute for each row")
 	flag.BoolVar(&dryRun, "dry-run", false, "Print commands to stdout instead of executing them")
+	flag.BoolVar(&noLogFiles, "no-log-files", false, "Skip logging execution output to files")
 	flag.Parse()
 
 	if dataFile != "" && execTemplate != "" {
-		if err := processDataFileWithDryRun(dataFile, execTemplate, dryRun); err != nil {
+		if err := processDataFileWithOptions(dataFile, execTemplate, dryRun, noLogFiles); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -55,15 +77,56 @@ func main() {
 	}
 }
 
+func createLogWriter(dataFile string) (*LogWriter, error) {
+	// Extract filename without extension for log file naming
+	baseName := filepath.Base(dataFile)
+	ext := filepath.Ext(baseName)
+	if ext != "" {
+		baseName = baseName[:len(baseName)-len(ext)]
+	}
+	
+	// Create log file name with timestamp
+	timestamp := time.Now().Format("20060102-150405")
+	logFileName := fmt.Sprintf("xrun-%s-%s.logs", baseName, timestamp)
+	
+	file, err := os.Create(logFileName)
+	if err != nil {
+		return nil, err
+	}
+	
+	return &LogWriter{file: file}, nil
+}
+
+func createCommandExecutor(dryRun bool, logWriter *LogWriter) CommandExecutor {
+	if dryRun {
+		return printCommand
+	}
+	return func(command string) error {
+		return executeCommandWithLogging(command, logWriter)
+	}
+}
+
 func processDataFile(dataFile, execTemplate string) error {
 	return processDataFileWithExecutor(dataFile, execTemplate, executeCommand)
 }
 
 func processDataFileWithDryRun(dataFile, execTemplate string, dryRun bool) error {
-	executor := executeCommand
-	if dryRun {
-		executor = printCommand
+	return processDataFileWithOptions(dataFile, execTemplate, dryRun, false)
+}
+
+func processDataFileWithOptions(dataFile, execTemplate string, dryRun, noLogFiles bool) error {
+	var logWriter *LogWriter
+	var err error
+	
+	if !dryRun && !noLogFiles {
+		logWriter, err = createLogWriter(dataFile)
+		if err != nil {
+			return fmt.Errorf("failed to create log file: %v", err)
+		}
+		defer logWriter.Close()
 	}
+	
+	executor := createCommandExecutor(dryRun, logWriter)
 	return processDataFileWithExecutor(dataFile, execTemplate, executor)
 }
 
@@ -274,6 +337,34 @@ func executeCommand(command string) error {
 	return cmd.Run()
 }
 
+func executeCommandWithLogging(command string, logWriter *LogWriter) error {
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return fmt.Errorf("empty command")
+	}
+
+	cmd := exec.Command(parts[0], parts[1:]...)
+	
+	// Create multi-writers to output to both console and log file
+	var stdoutWriter, stderrWriter io.Writer
+	if logWriter != nil {
+		stdoutWriter = io.MultiWriter(os.Stdout, logWriter)
+		stderrWriter = io.MultiWriter(os.Stderr, logWriter)
+		
+		// Write command to log file
+		fmt.Fprintf(logWriter, "Executing: %s\n", command)
+	} else {
+		stdoutWriter = os.Stdout
+		stderrWriter = os.Stderr
+	}
+	
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
+	
+	fmt.Printf("Executing: %s\n", command)
+	return cmd.Run()
+}
+
 func printCommand(command string) error {
 	fmt.Println(command)
 	return nil
@@ -283,14 +374,15 @@ func showHelp() {
 	fmt.Println("xrun - CLI tool")
 	fmt.Println("\nUsage:")
 	fmt.Println("  xrun <command>")
-	fmt.Println("  xrun -d <data-file> -e \"<command-template>\" [--dry-run]")
+	fmt.Println("  xrun -d <data-file> -e \"<command-template>\" [--dry-run] [--no-log-files]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  version    Show version information")
 	fmt.Println("  help       Show this help message")
 	fmt.Println("\nData processing options:")
-	fmt.Println("  -d         Path to the data file (CSV/JSON/JSONL)")
-	fmt.Println("  -e         Command template to execute for each row")
-	fmt.Println("  --dry-run  Print commands to stdout instead of executing them")
+	fmt.Println("  -d              Path to the data file (CSV/JSON/JSONL)")
+	fmt.Println("  -e              Command template to execute for each row")
+	fmt.Println("  --dry-run       Print commands to stdout instead of executing them")
+	fmt.Println("  --no-log-files  Skip logging execution output to files")
 	fmt.Println("\nSupported file formats:")
 	fmt.Println("  .csv       CSV files with headers")
 	fmt.Println("  .json      JSON array of objects")
@@ -298,4 +390,6 @@ func showHelp() {
 	fmt.Println("  other      Defaults to CSV parsing")
 	fmt.Println("\nTemplate syntax:")
 	fmt.Println("  Use {{.field_name}} to substitute values from data fields")
+	fmt.Println("\nLog files:")
+	fmt.Println("  By default, execution output is saved to xrun-[data-file-name]-[timestamp].logs")
 }

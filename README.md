@@ -40,6 +40,7 @@ xrun -d <data-file> -e "<command-template>"
 - `-d, --data`: Path to the data file (CSV or JSON)
 - `-e, --exec`: Command template to execute for each row
 - `--dry-run`: Print commands to stdout instead of executing them
+- `--no-log-files`: Skip logging execution output to files
 
 ### Template Syntax
 
@@ -113,6 +114,30 @@ curl -X GET http://api.example.com/users/1
 curl -X GET http://api.example.com/users/2
 curl -X GET http://api.example.com/users/3
 ```
+
+## Execution Logging
+
+By default, xrun automatically captures all stdout and stderr output from executed commands to log files. Log files are created in the current directory with the naming format:
+
+```
+xrun-[data-file-name]-[timestamp].logs
+```
+
+For example, running `xrun -d users.csv -e "..."` creates a log file like `xrun-users-20231025-143022.logs`.
+
+### Logging Options
+
+- **Default behavior**: All command output is logged to files while still being displayed in the console
+- **Skip logging**: Use `--no-log-files` to disable log file creation
+- **Dry run mode**: No log files are created when using `--dry-run`
+
+### Log File Contents
+
+Log files contain:
+- The executed command for each row
+- All stdout output from the commands
+- All stderr output from the commands
+- Timestamps and execution details
 
 ## Data File Formats
 
