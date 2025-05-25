@@ -12,6 +12,9 @@ import (
 	"text/template"
 )
 
+// CommandExecutor is a function type for executing commands, allowing for dependency injection
+type CommandExecutor func(command string) error
+
 func main() {
 	var dataFile string
 	var execTemplate string
@@ -48,6 +51,11 @@ func main() {
 }
 
 func processCSV(dataFile, execTemplate string) error {
+	return processCSVWithExecutor(dataFile, execTemplate, executeCommand)
+}
+
+// processCSVWithExecutor handles CSV processing with an injectable command executor
+func processCSVWithExecutor(dataFile, execTemplate string, executor CommandExecutor) error {
 	file, err := os.Open(dataFile)
 	if err != nil {
 		return fmt.Errorf("failed to open data file: %v", err)
@@ -89,7 +97,7 @@ func processCSV(dataFile, execTemplate string) error {
 		}
 
 		command := buf.String()
-		if err := executeCommand(command); err != nil {
+		if err := executor(command); err != nil {
 			fmt.Fprintf(os.Stderr, "Command execution error: %v\n", err)
 		}
 	}
