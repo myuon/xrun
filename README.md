@@ -39,6 +39,7 @@ xrun -d <data-file> -e "<command-template>"
 
 - `-d, --data`: Path to the data file (CSV or JSON)
 - `-e, --exec`: Command template to execute for each row
+- `--dry-run`: Print commands to stdout instead of executing them
 
 ### Template Syntax
 
@@ -90,6 +91,27 @@ xrun -d files.csv -e "cp {{.source}} {{.destination}}"
 Execute database queries:
 ```bash
 xrun -d queries.csv -e "mysql -u root -p database -e 'UPDATE users SET status=\"{{.status}}\" WHERE id={{.id}};'"
+```
+
+## Dry-Run Mode
+
+Use the `--dry-run` flag to preview commands without executing them. This is useful for:
+- Testing command templates before execution
+- Debugging template syntax
+- Reviewing batch operations safely
+
+### Example
+
+Preview commands that would be executed:
+```bash
+xrun -d users.csv -e "curl -X GET http://api.example.com/users/{{.user_id}}" --dry-run
+```
+
+Output:
+```bash
+curl -X GET http://api.example.com/users/1
+curl -X GET http://api.example.com/users/2
+curl -X GET http://api.example.com/users/3
 ```
 
 ## Data File Formats
