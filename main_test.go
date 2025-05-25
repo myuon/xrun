@@ -7,145 +7,174 @@ import (
 )
 
 func TestProcessCSVWithExecutor(t *testing.T) {
-	// Create a temporary CSV file for testing
-	csvContent := `user_id,name,email
+	tests := []struct {
+		name             string
+		csvContent       string
+		execTemplate     string
+		expectedCommands []string
+		expectError      bool
+		errorContains    string
+	}{
+		{
+			name: "basic template substitution",
+			csvContent: `user_id,name,email
 1,John Doe,john@example.com
-2,Jane Smith,jane@example.com`
-
-	tmpFile, err := os.CreateTemp("", "test_*.csv")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.WriteString(csvContent); err != nil {
-		t.Fatalf("Failed to write to temp file: %v", err)
-	}
-	tmpFile.Close()
-
-	// Track executed commands
-	var executedCommands []string
-	mockExecutor := func(command string) error {
-		executedCommands = append(executedCommands, command)
-		return nil
-	}
-
-	// Test template substitution
-	execTemplate := "echo {{.name}} {{.email}}"
-	
-	err = processCSVWithExecutor(tmpFile.Name(), execTemplate, mockExecutor)
-	if err != nil {
-		t.Fatalf("processCSVWithExecutor failed: %v", err)
-	}
-
-	// Verify expected commands were executed
-	expectedCommands := []string{
-		"echo John Doe john@example.com",
-		"echo Jane Smith jane@example.com",
-	}
-
-	if len(executedCommands) != len(expectedCommands) {
-		t.Fatalf("Expected %d commands, got %d", len(expectedCommands), len(executedCommands))
-	}
-
-	for i, expected := range expectedCommands {
-		if executedCommands[i] != expected {
-			t.Errorf("Command %d: expected %q, got %q", i, expected, executedCommands[i])
-		}
-	}
-}
-
-func TestProcessCSVWithExecutor_TemplateError(t *testing.T) {
-	// Create a temporary CSV file for testing
-	csvContent := `user_id,name,email
-1,John Doe,john@example.com`
-
-	tmpFile, err := os.CreateTemp("", "test_*.csv")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.WriteString(csvContent); err != nil {
-		t.Fatalf("Failed to write to temp file: %v", err)
-	}
-	tmpFile.Close()
-
-	// Track executed commands
-	var executedCommands []string
-	mockExecutor := func(command string) error {
-		executedCommands = append(executedCommands, command)
-		return nil
+2,Jane Smith,jane@example.com`,
+			execTemplate: "echo {{.name}} {{.email}}",
+			expectedCommands: []string{
+				"echo John Doe john@example.com",
+				"echo Jane Smith jane@example.com",
+			},
+			expectError: false,
+		},
+		{
+			name: "template with missing field",
+			csvContent: `user_id,name,email
+1,John Doe,john@example.com`,
+			execTemplate: "echo {{.invalid_field}}",
+			expectedCommands: []string{
+				"echo ",
+			},
+			expectError: false,
+		},
+		{
+			name: "single field template",
+			csvContent: `name
+Alice
+Bob`,
+			execTemplate: "echo Hello {{.name}}",
+			expectedCommands: []string{
+				"echo Hello Alice",
+				"echo Hello Bob",
+			},
+			expectError: false,
+		},
+		{
+			name: "multiple field template",
+			csvContent: `id,name,age,city
+1,Alice,25,Tokyo
+2,Bob,30,Osaka`,
+			execTemplate: "echo {{.name}} is {{.age}} years old and lives in {{.city}}",
+			expectedCommands: []string{
+				"echo Alice is 25 years old and lives in Tokyo",
+				"echo Bob is 30 years old and lives in Osaka",
+			},
+			expectError: false,
+		},
 	}
 
-	// Test with invalid template
-	execTemplate := "echo {{.invalid_field}}"
-	
-	err = processCSVWithExecutor(tmpFile.Name(), execTemplate, mockExecutor)
-	if err != nil {
-		t.Fatalf("processCSVWithExecutor failed: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temporary CSV file
+			tmpFile, err := os.CreateTemp("", "test_*.csv")
+			if err != nil {
+				t.Fatalf("Failed to create temp file: %v", err)
+			}
+			defer os.Remove(tmpFile.Name())
 
-	// Should still process the row but with empty substitution
-	expectedCommands := []string{
-		"echo ",
-	}
+			if _, err := tmpFile.WriteString(tt.csvContent); err != nil {
+				t.Fatalf("Failed to write to temp file: %v", err)
+			}
+			tmpFile.Close()
 
-	if len(executedCommands) != len(expectedCommands) {
-		t.Fatalf("Expected %d commands, got %d", len(expectedCommands), len(executedCommands))
-	}
+			// Track executed commands
+			var executedCommands []string
+			mockExecutor := func(command string) error {
+				executedCommands = append(executedCommands, command)
+				return nil
+			}
 
-	for i, expected := range expectedCommands {
-		if executedCommands[i] != expected {
-			t.Errorf("Command %d: expected %q, got %q", i, expected, executedCommands[i])
-		}
-	}
-}
+			// Execute test
+			err = processCSVWithExecutor(tmpFile.Name(), tt.execTemplate, mockExecutor)
 
-func TestProcessCSVWithExecutor_FileNotFound(t *testing.T) {
-	mockExecutor := func(command string) error {
-		return nil
-	}
+			// Check error expectation
+			if tt.expectError && err == nil {
+				t.Fatal("Expected error but got nil")
+			}
+			if !tt.expectError && err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if tt.expectError && err != nil {
+				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error to contain %q, got: %v", tt.errorContains, err)
+				}
+				return
+			}
 
-	err := processCSVWithExecutor("nonexistent.csv", "echo {{.name}}", mockExecutor)
-	if err == nil {
-		t.Fatal("Expected error for nonexistent file, got nil")
-	}
+			// Verify executed commands
+			if len(executedCommands) != len(tt.expectedCommands) {
+				t.Fatalf("Expected %d commands, got %d", len(tt.expectedCommands), len(executedCommands))
+			}
 
-	if !strings.Contains(err.Error(), "failed to open data file") {
-		t.Errorf("Expected 'failed to open data file' error, got: %v", err)
+			for i, expected := range tt.expectedCommands {
+				if executedCommands[i] != expected {
+					t.Errorf("Command %d: expected %q, got %q", i, expected, executedCommands[i])
+				}
+			}
+		})
 	}
 }
 
-func TestProcessCSVWithExecutor_InvalidTemplate(t *testing.T) {
-	// Create a temporary CSV file for testing
-	csvContent := `user_id,name,email
-1,John Doe,john@example.com`
-
-	tmpFile, err := os.CreateTemp("", "test_*.csv")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
+func TestProcessCSVWithExecutor_ErrorCases(t *testing.T) {
+	tests := []struct {
+		name          string
+		csvFile       string
+		execTemplate  string
+		createFile    bool
+		csvContent    string
+		errorContains string
+	}{
+		{
+			name:          "file not found",
+			csvFile:       "nonexistent.csv",
+			execTemplate:  "echo {{.name}}",
+			createFile:    false,
+			errorContains: "failed to open data file",
+		},
+		{
+			name:         "invalid template syntax",
+			csvFile:      "",
+			execTemplate: "echo {{.name",
+			createFile:   true,
+			csvContent: `user_id,name,email
+1,John Doe,john@example.com`,
+			errorContains: "failed to parse template",
+		},
 	}
-	defer os.Remove(tmpFile.Name())
 
-	if _, err := tmpFile.WriteString(csvContent); err != nil {
-		t.Fatalf("Failed to write to temp file: %v", err)
-	}
-	tmpFile.Close()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var csvFile string
+			
+			if tt.createFile {
+				// Create temporary CSV file
+				tmpFile, err := os.CreateTemp("", "test_*.csv")
+				if err != nil {
+					t.Fatalf("Failed to create temp file: %v", err)
+				}
+				defer os.Remove(tmpFile.Name())
 
-	mockExecutor := func(command string) error {
-		return nil
-	}
+				if _, err := tmpFile.WriteString(tt.csvContent); err != nil {
+					t.Fatalf("Failed to write to temp file: %v", err)
+				}
+				tmpFile.Close()
+				csvFile = tmpFile.Name()
+			} else {
+				csvFile = tt.csvFile
+			}
 
-	// Test with invalid template syntax
-	execTemplate := "echo {{.name"
-	
-	err = processCSVWithExecutor(tmpFile.Name(), execTemplate, mockExecutor)
-	if err == nil {
-		t.Fatal("Expected error for invalid template, got nil")
-	}
+			mockExecutor := func(command string) error {
+				return nil
+			}
 
-	if !strings.Contains(err.Error(), "failed to parse template") {
-		t.Errorf("Expected 'failed to parse template' error, got: %v", err)
+			err := processCSVWithExecutor(csvFile, tt.execTemplate, mockExecutor)
+			if err == nil {
+				t.Fatal("Expected error but got nil")
+			}
+
+			if !strings.Contains(err.Error(), tt.errorContains) {
+				t.Errorf("Expected error to contain %q, got: %v", tt.errorContains, err)
+			}
+		})
 	}
 }
