@@ -56,19 +56,40 @@ func (lw *LogWriter) Close() error {
 func main() {
 	var dataFile string
 	var execTemplate string
+	var inputFile string
 	var dryRun bool
 	var noLogFiles bool
 
 	flag.StringVar(&dataFile, "d", "", "Path to the data file (CSV/JSON/JSONL)")
 	flag.StringVar(&execTemplate, "e", "", "Command template to execute for each row")
+	flag.StringVar(&inputFile, "i", "", "Path to file containing command template")
 	flag.BoolVar(&dryRun, "dry-run", false, "Print commands to stdout instead of executing them")
 	flag.BoolVar(&noLogFiles, "no-log-files", false, "Skip logging execution output to files")
 	flag.Parse()
 
-	if dataFile != "" && execTemplate != "" {
+	// Validate mutual exclusivity of -e and -i flags
+	if execTemplate != "" && inputFile != "" {
+		fmt.Fprintf(os.Stderr, "Error: -e and -i flags are mutually exclusive\n")
+		os.Exit(1)
+	}
+
+	var template string
+	if inputFile != "" {
+		// Read template from file
+		content, err := os.ReadFile(inputFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input file: %v\n", err)
+			os.Exit(1)
+		}
+		template = strings.TrimSpace(string(content))
+	} else {
+		template = execTemplate
+	}
+
+	if dataFile != "" && template != "" {
 		config := Config{
 			DataFile:   dataFile,
-			Template:   execTemplate,
+			Template:   template,
 			DryRun:     dryRun,
 			NoLogFiles: noLogFiles,
 		}
@@ -80,7 +101,7 @@ func main() {
 	}
 
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <command> OR %s -d <data-file> -e \"<command-template>\"\n", os.Args[0], os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s <command> OR %s -d <data-file> (-e \"<command-template>\" | -i <input-file>)\n", os.Args[0], os.Args[0])
 		os.Exit(1)
 	}
 
@@ -430,13 +451,14 @@ func showHelp() {
 	fmt.Println("xrun - CLI tool")
 	fmt.Println("\nUsage:")
 	fmt.Println("  xrun <command>")
-	fmt.Println("  xrun -d <data-file> -e \"<command-template>\" [--dry-run] [--no-log-files]")
+	fmt.Println("  xrun -d <data-file> (-e \"<command-template>\" | -i <input-file>) [--dry-run] [--no-log-files]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  version    Show version information")
 	fmt.Println("  help       Show this help message")
 	fmt.Println("\nData processing options:")
 	fmt.Println("  -d              Path to the data file (CSV/JSON/JSONL)")
 	fmt.Println("  -e              Command template to execute for each row")
+	fmt.Println("  -i              Path to file containing command template")
 	fmt.Println("  --dry-run       Print commands to stdout instead of executing them")
 	fmt.Println("  --no-log-files  Skip logging execution output to files")
 	fmt.Println("\nSupported file formats:")
