@@ -404,12 +404,11 @@ func executeCommand(command string, progress Progress) error {
 
 
 func executeCommandWithProgressAndLogging(command string, current int, total int, logWriter *LogWriter) error {
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
+	if strings.TrimSpace(command) == "" {
 		return fmt.Errorf("empty command")
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd := exec.Command("bash", "-c", command)
 	
 	// Create multi-writers to output to both console and log file
 	var stdoutWriter, stderrWriter io.Writer
